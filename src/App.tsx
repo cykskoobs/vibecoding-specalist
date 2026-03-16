@@ -50,8 +50,11 @@ declare global {
 const COMMITMENT = "confirmed";
 const LAMPORTS_PER_SOL = 1_000_000_000;
 const DUST_THRESHOLD_USD = 3;
-const CUSTOM_RPC = (import.meta.env.VITE_SOLANA_RPC as string | undefined)?.trim() ?? "";
+const APP_RPC_PROXY = "/api/solana-rpc";
+const CUSTOM_RPC_RAW = (import.meta.env.VITE_SOLANA_RPC as string | undefined)?.trim() ?? "";
+const CUSTOM_RPC = /^https?:\/\//i.test(CUSTOM_RPC_RAW) ? CUSTOM_RPC_RAW : "";
 const RPC_ENDPOINTS: string[] = [
+  APP_RPC_PROXY,
   CUSTOM_RPC,
   "https://api.mainnet-beta.solana.com",
   "https://solana.public-rpc.com",
@@ -125,7 +128,7 @@ function getProvider(walletId: WalletId): PhantomProvider | null {
         }
       }
 
-      if (isProvider(window.solana) && window.solana?.isJupiter && !window.solana?.isPhantom) {
+      if (isProvider(window.solana) && !window.solana?.isPhantom) {
         return window.solana;
       }
 
@@ -675,6 +678,7 @@ export default function App(): JSX.Element {
             <div className="grid gap-2 sm:grid-cols-2">
               {WALLET_OPTIONS.map((wallet) => {
                 const detected = isWalletDetected(wallet.id);
+                const canAttemptConnect = wallet.id === "jupiter" ? true : detected;
                 const selected = selectedWallet === wallet.id;
 
                 return (
@@ -683,12 +687,12 @@ export default function App(): JSX.Element {
                     type="button"
                     onClick={() => connectWallet(wallet.id)}
                     onMouseEnter={() => setSelectedWallet(wallet.id)}
-                    disabled={busy || !detected}
+                    disabled={busy || !canAttemptConnect}
                     className={`flex items-center gap-3 rounded-xl border p-3 text-left transition ${
                       selected
                         ? "border-cyan-300/70 bg-cyan-300/15"
                         : "border-cyan-100/25 bg-[#0a1931]/70"
-                    } ${detected ? "hover:bg-cyan-300/20" : "opacity-60"}`}
+                    } ${canAttemptConnect ? "hover:bg-cyan-300/20" : "opacity-60"}`}
                   >
                     <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#16213f]/35">
                       {brokenLogos[wallet.id] ? (
@@ -704,7 +708,7 @@ export default function App(): JSX.Element {
                     </div>
                     <div>
                       <p className="font-semibold text-cyan-50">{wallet.name}</p>
-                      <p className="text-xs text-cyan-100/70">{detected ? "Click to connect" : "Extension not detected"}</p>
+                      <p className="text-xs text-cyan-100/70">{canAttemptConnect ? "Click to connect" : "Extension not detected"}</p>
                     </div>
                   </button>
                 );
@@ -816,6 +820,12 @@ export default function App(): JSX.Element {
     </main>
   );
 }
+
+
+
+
+
+
 
 
 
