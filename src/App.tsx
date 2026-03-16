@@ -183,7 +183,7 @@ function humanizeError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
 
   if (message.includes("403") || message.toLowerCase().includes("access forbidden")) {
-    return "Network access issue. Try Rescan. If it keeps failing, set VITE_SOLANA_RPC to a dedicated mainnet RPC and redeploy.";
+    return "Network access issue. Try Rescan. If it keeps failing, set SOLANA_RPC_URL (and VITE_SOLANA_RPC) to a dedicated mainnet RPC and redeploy.";
   }
 
   if (message.includes("429")) {
@@ -677,6 +677,30 @@ export default function App(): JSX.Element {
       >
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_15%_15%,rgba(0,255,163,0.08),transparent_35%),radial-gradient(circle_at_85%_5%,rgba(125,95,255,0.1),transparent_35%)]" />
         <BackgroundPathsLayer className="!opacity-45" />
+        <AnimatePresence>
+          {busy ? (
+            <motion.div
+              className="absolute inset-0 z-20 flex items-center justify-center bg-[#020817]/55 backdrop-blur-sm"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+            >
+              <div className="w-[min(440px,88%)] rounded-2xl border border-cyan-300/30 bg-[#06142b]/85 p-4 shadow-neon">
+                <div className="mb-2 flex items-center justify-between text-sm text-cyan-100/90">
+                  <span>Scanning Solana accounts...</span>
+                  <span className="text-cyan-200/70">Please wait</span>
+                </div>
+                <div className="h-2 overflow-hidden rounded-full bg-cyan-100/15">
+                  <motion.div
+                    className="h-full w-1/3 rounded-full bg-gradient-to-r from-[#00FFA3] via-[#59E2FF] to-[#A86BFF]"
+                    animate={{ x: ["-120%", "320%"] }}
+                    transition={{ duration: 1.2, repeat: Number.POSITIVE_INFINITY, ease: "linear" }}
+                  />
+                </div>
+              </div>
+            </motion.div>
+          ) : null}
+        </AnimatePresence>
         <div className="relative z-10 space-y-5">
           <div className="flex items-center gap-3">
             <SolanaLogo />
@@ -854,6 +878,8 @@ export default function App(): JSX.Element {
     </main>
   );
 }
+
+
 
 
 

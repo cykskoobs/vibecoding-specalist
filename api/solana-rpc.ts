@@ -7,10 +7,12 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
+    const payload = typeof req.body === "string" ? req.body : JSON.stringify(req.body ?? {});
+
     const upstream = await fetch(RPC_URL, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(req.body)
+      body: payload
     });
 
     const text = await upstream.text();
