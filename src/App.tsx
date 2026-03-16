@@ -25,6 +25,7 @@ type WalletId = "phantom" | "jupiter";
 
 type PhantomProvider = {
   isPhantom?: boolean;
+  isJupiter?: boolean;
   publicKey?: { toBase58: () => string };
   connect: (opts?: { onlyIfTrusted?: boolean }) => Promise<{ publicKey: { toBase58: () => string } }>;
   request?: (args: { method: string; params?: unknown[] }) => Promise<any>;
@@ -41,6 +42,8 @@ declare global {
     phantom?: { solana?: PhantomProvider };
     solana?: PhantomProvider;
     jupiter?: { solana?: PhantomProvider };
+    jup?: { solana?: PhantomProvider };
+    jupiterWallet?: { solana?: PhantomProvider };
   }
 }
 
@@ -81,6 +84,18 @@ function chunk<T>(values: T[], size: number): T[][] {
   return chunks;
 }
 
+function isProvider(value: unknown): value is PhantomProvider {
+  return Boolean(value) && typeof (value as PhantomProvider).connect === "function";
+}
+
+function isJupiterProvider(value: unknown): value is PhantomProvider {
+  if (!isProvider(value)) {
+    return false;
+  }
+
+  const provider = value as PhantomProvider;
+  return !provider.isPhantom;
+}
 function shortKey(value: string): string {
   return `${value.slice(0, 4)}...${value.slice(-4)}`;
 }
@@ -96,7 +111,25 @@ function getProvider(walletId: WalletId): PhantomProvider | null {
     }
 
     if (walletId === "jupiter") {
-      return window.jupiter?.solana ?? null;
+      const candidates: unknown[] = [
+        window.jupiter?.solana,
+        window.jup?.solana,
+        window.jupiterWallet?.solana,
+        window.jupiter as unknown,
+        window.jup as unknown
+      ];
+
+      for (const candidate of candidates) {
+        if (isJupiterProvider(candidate)) {
+          return candidate;
+        }
+      }
+
+      if (isProvider(window.solana) && window.solana?.isJupiter && !window.solana?.isPhantom) {
+        return window.solana;
+      }
+
+      return null;
     }
   } catch {
     return null;
@@ -783,6 +816,12 @@ export default function App(): JSX.Element {
     </main>
   );
 }
+
+
+
+
+
+
 
 
 
