@@ -47,12 +47,14 @@ declare global {
 const COMMITMENT = "confirmed";
 const LAMPORTS_PER_SOL = 1_000_000_000;
 const DUST_THRESHOLD_USD = 3;
-const RPC_ENDPOINTS = [
+const CUSTOM_RPC = (import.meta.env.VITE_SOLANA_RPC as string | undefined)?.trim() ?? "";
+const RPC_ENDPOINTS: string[] = [
+  CUSTOM_RPC,
   "https://api.mainnet-beta.solana.com",
   "https://solana.public-rpc.com",
   "https://solana-rpc.publicnode.com",
   "https://rpc.ankr.com/solana"
-] as const;
+].filter((endpoint) => Boolean(endpoint));
 
 const WALLET_OPTIONS: Array<{ id: WalletId; name: string; logoUrl: string; logoAlt: string }> = [
   {
@@ -94,7 +96,7 @@ function getProvider(walletId: WalletId): PhantomProvider | null {
     }
 
     if (walletId === "jupiter") {
-      return window.jupiter?.solana ?? window.phantom?.solana ?? null;
+      return window.jupiter?.solana ?? null;
     }
   } catch {
     return null;
@@ -111,7 +113,7 @@ function humanizeError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
 
   if (message.includes("403") || message.toLowerCase().includes("access forbidden")) {
-    return "Network access issue. Try Rescan in a few seconds.";
+    return "Network access issue. Try Rescan. If it keeps failing, set VITE_SOLANA_RPC to a dedicated mainnet RPC and redeploy.";
   }
 
   if (message.includes("429")) {
@@ -241,6 +243,7 @@ export default function App(): JSX.Element {
 
       const { Connection, PublicKey, TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID } = await loadSolanaSdk();
       const owner = new PublicKey(trimmedAddress);
+
       const parseJsonParsedScan = (responseValue: any[], programIdBase58: string) => {
         const discovered: CloseableTokenAccount[] = [];
         const nonEmptyAccounts: DustTokenAccount[] = [];
@@ -297,94 +300,53 @@ export default function App(): JSX.Element {
       const scanViaConnection = async (connection: any) => {
         const discovered: CloseableTokenAccount[] = [];
         const nonEmptyAccounts: DustTokenAccount[] = [];
-        let usedRawFallback = false;
 
         for (const programId of [TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID]) {
-          try {
-            const response = await connection.getParsedTokenAccountsByOwner(owner, { programId }, COMMITMENT);
+          const response = await connection.getTokenAccountsByOwner(
+            owner,
+            { programId },
+            { commitment: COMMITMENT, encoding: "jsonParsed" }
+          );
 
-            for (const tokenAccount of response.value) {
-              const info = (tokenAccount.account.data as any).parsed.info as {
-                mint: string;
-                tokenAmount: { amount: string; uiAmountString?: string; uiAmount?: number; decimals: number };
-              };
-
-              const amountRaw = info.tokenAmount.amount ?? "0";
-              const uiAmountFromString = Number(info.tokenAmount.uiAmountString ?? "0");
-              const uiAmountNormalized =
-                Number.isFinite(uiAmountFromString) && uiAmountFromString >= 0
-                  ? uiAmountFromString
-                  : typeof info.tokenAmount.uiAmount === "number"
-                    ? info.tokenAmount.uiAmount
-                    : Number(amountRaw) / 10 ** info.tokenAmount.decimals;
-              const isZeroBalance = amountRaw === "0" || uiAmountNormalized === 0;
-
-              if (isZeroBalance) {
-                discovered.push({
-                  address: tokenAccount.pubkey.toBase58(),
-                  mint: info.mint,
-                  lamports: tokenAccount.account.lamports,
-                  programId: programId.toBase58()
-                });
-                continue;
-              }
-
-              nonEmptyAccounts.push({
-                address: tokenAccount.pubkey.toBase58(),
-                mint: info.mint,
-                lamports: tokenAccount.account.lamports,
-                programId: programId.toBase58(),
-                amountRaw,
-                decimals: info.tokenAmount.decimals,
-                uiAmount: uiAmountNormalized,
-                uiAmountString: info.tokenAmount.uiAmountString ?? "0",
-                priceUsd: 0,
-                usdValue: 0
-              });
-            }
-          } catch {
-            usedRawFallback = true;
-            const rawResponse = await connection.getTokenAccountsByOwner(
-              owner,
-              { programId },
-              { commitment: COMMITMENT, encoding: "jsonParsed" }
-            );
-
-            const parsed = parseJsonParsedScan(rawResponse.value, programId.toBase58());
-            discovered.push(...parsed.discovered);
-            nonEmptyAccounts.push(...parsed.nonEmptyAccounts);
-          }
+          const parsed = parseJsonParsedScan(response.value, programId.toBase58());
+          discovered.push(...parsed.discovered);
+          nonEmptyAccounts.push(...parsed.nonEmptyAccounts);
         }
 
-        return { discovered, nonEmptyAccounts, usedRawFallback };
+        return { discovered, nonEmptyAccounts };
       };
 
       const endpoints = [activeEndpoint, ...RPC_ENDPOINTS.filter((endpoint) => endpoint !== activeEndpoint)];
-      let bestResult: { discovered: CloseableTokenAccount[]; nonEmptyAccounts: DustTokenAccount[]; usedRawFallback: boolean } | null = null;
+      let bestResult: { discovered: CloseableTokenAccount[]; nonEmptyAccounts: DustTokenAccount[] } | null = null;
       let bestEndpoint = activeEndpoint;
       let latestError: unknown = null;
 
-      for (const endpoint of endpoints) {
-        try {
-          const connection = new Connection(endpoint, COMMITMENT);
-          const scanned = await scanViaConnection(connection);
-          const isBetter =
-            !bestResult ||
-            scanned.discovered.length > bestResult.discovered.length ||
-            (bestResult.discovered.length === 0 && scanned.nonEmptyAccounts.length > bestResult.nonEmptyAccounts.length);
+      for (let round = 0; round < 2; round += 1) {
+        for (const endpoint of endpoints) {
+          try {
+            const connection = new Connection(endpoint, COMMITMENT);
+            const scanned = await scanViaConnection(connection);
+            const isBetter =
+              !bestResult ||
+              scanned.discovered.length > bestResult.discovered.length ||
+              (bestResult.discovered.length === 0 && scanned.nonEmptyAccounts.length > bestResult.nonEmptyAccounts.length);
 
-          if (isBetter) {
-            bestResult = scanned;
-            bestEndpoint = endpoint;
+            if (isBetter) {
+              bestResult = scanned;
+              bestEndpoint = endpoint;
+            }
+          } catch (error) {
+            latestError = error;
           }
-
-          if (scanned.discovered.length > 0) {
-            break;
-          }
-        } catch (error) {
-          latestError = error;
         }
+
+        if (bestResult) {
+          break;
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 350 * (round + 1)));
       }
+
       if (!bestResult) {
         throw latestError ?? new Error("Unable to scan token accounts right now.");
       }
@@ -418,11 +380,7 @@ export default function App(): JSX.Element {
       setScannedOwner(owner.toBase58());
       setAccounts(bestResult.discovered);
       setDustAccounts(lowValueDust);
-      if (bestResult.usedRawFallback) {
-        setStatus(`Scan complete. Found ${bestResult.discovered.length} closeable empty account(s).`);
-      } else {
-        setStatus(`Scan complete: ${bestResult.discovered.length} closeable empty + ${lowValueDust.length} worthless token candidates.`);
-      }
+      setStatus(`Scan complete: ${bestResult.discovered.length} closeable empty + ${lowValueDust.length} worthless token candidates.`);
     } catch (error) {
       setStatus(humanizeError(error));
     } finally {
@@ -825,6 +783,12 @@ export default function App(): JSX.Element {
     </main>
   );
 }
+
+
+
+
+
+
 
 
 
