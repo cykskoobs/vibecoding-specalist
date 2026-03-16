@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from "react";
+﻿import { useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { ArrowRightLeft, Copy, Eye, Flame, LogOut, RefreshCw, Wallet } from "lucide-react";
 
@@ -295,8 +295,13 @@ export default function App(): JSX.Element {
   const [activeEndpoint, setActiveEndpoint] = useState<string>(RPC_ENDPOINTS[0]);
   const [claimFx, setClaimFx] = useState<{ show: boolean; amount: string }>({ show: false, amount: "0" });
   const [showWorthlessTools, setShowWorthlessTools] = useState<boolean>(false);
-  const [cooldownSeconds, setCooldownSeconds] = useState<number>(0);
-  const [claimReceipt, setClaimReceipt] = useState<{ open: boolean; amount: string }>({ open: false, amount: "0" });
+    const [claimReceipt, setClaimReceipt] = useState<{ open: boolean; amount: string }>({ open: false, amount: "0" });
+  const lastScanRef = useRef<{
+    owner: string;
+    at: number;
+    accounts: CloseableTokenAccount[];
+    dustAccounts: DustTokenAccount[];
+  } | null>(null);
 
   const reclaimLamports = accounts.reduce((sum, account) => sum + account.lamports, 0);
   const reclaimSol = (reclaimLamports / LAMPORTS_PER_SOL).toFixed(6);
@@ -304,19 +309,7 @@ export default function App(): JSX.Element {
   const dustRentSol = (dustRentLamports / LAMPORTS_PER_SOL).toFixed(6);
   const canClaim = walletAddress.length > 0 && walletAddress === scannedOwner && accounts.length > 0;
   const canBurnDust = walletAddress.length > 0 && walletAddress === scannedOwner && dustAccounts.length > 0;
-  const scanLocked = busy || cooldownSeconds > 0;
-
-  useEffect(() => {
-    if (cooldownSeconds <= 0) {
-      return;
-    }
-    const timer = window.setInterval(() => {
-      setCooldownSeconds((current) => (current > 0 ? current - 1 : 0));
-    }, 1000);
-    return () => window.clearInterval(timer);
-  }, [cooldownSeconds]);
-
-  const playClaimDing = (): void => {
+    const playClaimDing = (): void => {
     if (typeof window === "undefined") {
       return;
     }
@@ -363,10 +356,18 @@ export default function App(): JSX.Element {
 
     throw latestError ?? new Error("Unable to reach Solana RPC endpoints.");
   };
-  const scanAccounts = async (ownerAddress: string): Promise<void> => {
+  const scanAccounts = async (ownerAddress: string, options?: { force?: boolean }): Promise<void> => {
     const trimmedAddress = ownerAddress.trim();
     if (!trimmedAddress) {
       setStatus("Enter a valid Solana address first.");
+      return;
+    }
+    const cached = lastScanRef.current;
+    if (!options?.force && cached && cached.owner === trimmedAddress && Date.now() - cached.at < 8000) {
+      setScannedOwner(cached.owner);
+      setAccounts(cached.accounts);
+      setDustAccounts(cached.dustAccounts);
+      setStatus(`Using recent scan result: ${cached.accounts.length} closeable empty + ${cached.dustAccounts.length} worthless token candidates.`);
       return;
     }
 
@@ -579,12 +580,17 @@ export default function App(): JSX.Element {
       setScannedOwner(owner.toBase58());
       setAccounts(bestResult.discovered);
       setDustAccounts(lowValueDust);
+      lastScanRef.current = {
+        owner: owner.toBase58(),
+        at: Date.now(),
+        accounts: bestResult.discovered,
+        dustAccounts: lowValueDust
+      };
       setStatus(`Scan complete: ${bestResult.discovered.length} closeable empty + ${lowValueDust.length} worthless token candidates.`);
     } catch (error) {
       setStatus(humanizeError(error));
     } finally {
       setBusy(false);
-      setCooldownSeconds(15);
     }
   };
 
@@ -613,7 +619,7 @@ export default function App(): JSX.Element {
       setSelectedWallet(walletId);
       setConnectedWalletName(WALLET_OPTIONS.find((wallet) => wallet.id === walletId)?.name ?? "Wallet");
       setProvider(targetProvider);
-      await scanAccounts(connected);
+      await scanAccounts(connected, { force: true });
     } catch (error) {
       setStatus(humanizeError(error));
       setBusy(false);
@@ -701,7 +707,7 @@ export default function App(): JSX.Element {
       setTxSignatures(signatures);
       setClaimFx({ show: true, amount: claimedAmount });
       setTimeout(() => setClaimFx({ show: false, amount: "0" }), 2200);
-      await scanAccounts(walletAddress);
+      await scanAccounts(walletAddress, { force: true });
       playClaimDing();
       setClaimReceipt({ open: true, amount: claimedAmount });
     } catch (error) {
@@ -782,7 +788,7 @@ export default function App(): JSX.Element {
       setTxSignatures(signatures);
       setClaimFx({ show: true, amount: dustRentSol });
       setTimeout(() => setClaimFx({ show: false, amount: "0" }), 2200);
-      await scanAccounts(walletAddress);
+      await scanAccounts(walletAddress, { force: true });
       setStatus("Worthless tokens burned and rent reclaimed.");
     } catch (error) {
       setStatus(humanizeError(error));
@@ -926,9 +932,9 @@ export default function App(): JSX.Element {
               disabled={busy}
             />
 
-            <Button variant="ghost" onClick={() => scanAccounts(addressInput.trim() || walletAddress)} disabled={scanLocked} className="h-12 rounded-xl border border-cyan-100/25 bg-white/10 px-5 text-cyan-50 hover:bg-white/20 disabled:opacity-60">
+            <Button variant="ghost" onClick={() => scanAccounts(addressInput.trim() || walletAddress)} disabled={busy} className="h-12 rounded-xl border border-cyan-100/25 bg-white/10 px-5 text-cyan-50 hover:bg-white/20 disabled:opacity-60">
               <Eye className="mr-2 h-4 w-4" />
-              {cooldownSeconds > 0 ? `Preview (${cooldownSeconds}s)` : "Preview"}
+              Preview
             </Button>
 
             <Button disabled className="h-12 rounded-xl bg-slate-800/70 px-5 font-semibold text-cyan-100/70">
@@ -962,9 +968,9 @@ export default function App(): JSX.Element {
 
             {walletAddress ? (
               <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                <Button onClick={() => scanAccounts(walletAddress)} disabled={scanLocked} className="h-11 rounded-xl bg-gradient-to-r from-[#00FFA3] to-[#7B5CFF] font-semibold text-[#041629] hover:opacity-90">
+                <Button onClick={() => scanAccounts(walletAddress)} disabled={busy} className="h-11 rounded-xl bg-gradient-to-r from-[#00FFA3] to-[#7B5CFF] font-semibold text-[#041629] hover:opacity-90">
                   <RefreshCw className="mr-2 h-4 w-4" />
-                  {cooldownSeconds > 0 ? `Rescan Wallet (${cooldownSeconds}s)` : "Rescan Wallet"}
+                  Rescan Wallet
                 </Button>
                 <Button onClick={claimAll} disabled={!canClaim || busy} className="h-11 rounded-xl bg-gradient-to-r from-[#00FFA3] to-[#7B5CFF] font-semibold text-[#041629] hover:opacity-90">
                   <ArrowRightLeft className="mr-2 h-4 w-4" />
@@ -1009,7 +1015,6 @@ export default function App(): JSX.Element {
           </div>
 
           <p className="text-center text-xs text-cyan-100/70">{status}</p>
-          {cooldownSeconds > 0 ? <p className="text-center text-xs text-cyan-100/60">Buttons unlock in {cooldownSeconds}s</p> : null}
           <p className="sr-only" aria-live="polite">{status}</p>
           <p className="sr-only" aria-hidden="true">{txSignatures.join(",")}</p>
         </div>
@@ -1074,6 +1079,8 @@ export default function App(): JSX.Element {
     </main>
   );
 }
+
+
 
 
 

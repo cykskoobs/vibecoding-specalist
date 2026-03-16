@@ -1,4 +1,4 @@
-const PRIMARY_RPC = process.env.SOLANA_RPC_URL || process.env.VITE_SOLANA_RPC || "";
+﻿const PRIMARY_RPC = process.env.SOLANA_RPC_URL || process.env.VITE_SOLANA_RPC || "";
 const RPC_URLS = [
   PRIMARY_RPC,
   "https://api.mainnet-beta.solana.com",
@@ -18,7 +18,15 @@ type ScanAccount = {
   decimals: number;
 };
 
+type ScanResponse = {
+  discovered: ScanAccount[];
+  nonEmptyAccounts: ScanAccount[];
+};
+
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const CACHE_TTL_MS = 8000;
+const scanCache = new Map<string, { at: number; data: ScanResponse }>();
+const inFlightScans = new Map<string, Promise<ScanResponse>>();
 
 async function callRpcWithRetry(payload: unknown) {
   let lastError: unknown = null;
@@ -50,6 +58,65 @@ async function callRpcWithRetry(payload: unknown) {
   throw lastError ?? new Error("RPC retries exhausted");
 }
 
+async function scanOwner(owner: string): Promise<ScanResponse> {
+  const payload = {
+    jsonrpc: "2.0",
+    id: Date.now(),
+    method: "getTokenAccountsByOwner",
+    params: [owner, { programId: "" }, { encoding: "jsonParsed", commitment: "confirmed" }]
+  };
+
+  const programIds = [
+    "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+  ];
+
+  const discovered: ScanAccount[] = [];
+  const nonEmptyAccounts: ScanAccount[] = [];
+
+  for (const programId of programIds) {
+    payload.params[1] = { programId };
+    const json = await callRpcWithRetry(payload);
+
+    const items = (json?.result?.value ?? []) as any[];
+    for (const tokenAccount of items) {
+      const parsedInfo = tokenAccount?.account?.data?.parsed?.info;
+      if (!parsedInfo?.tokenAmount) {
+        continue;
+      }
+
+      const amountRaw = String(parsedInfo.tokenAmount.amount ?? "0");
+      const uiAmountFromString = Number(parsedInfo.tokenAmount.uiAmountString ?? "0");
+      const decimals = Number(parsedInfo.tokenAmount.decimals ?? 0);
+      const uiAmount =
+        Number.isFinite(uiAmountFromString) && uiAmountFromString >= 0
+          ? uiAmountFromString
+          : typeof parsedInfo.tokenAmount.uiAmount === "number"
+            ? parsedInfo.tokenAmount.uiAmount
+            : Number(amountRaw) / 10 ** decimals;
+
+      const normalized: ScanAccount = {
+        address: String(tokenAccount?.pubkey ?? ""),
+        mint: String(parsedInfo.mint ?? ""),
+        lamports: Number(tokenAccount?.account?.lamports ?? 0),
+        programId,
+        amountRaw,
+        uiAmount,
+        uiAmountString: String(parsedInfo.tokenAmount.uiAmountString ?? "0"),
+        decimals
+      };
+
+      if (amountRaw === "0" || uiAmount === 0) {
+        discovered.push(normalized);
+      } else {
+        nonEmptyAccounts.push(normalized);
+      }
+    }
+  }
+
+  return { discovered, nonEmptyAccounts };
+}
+
 export default async function handler(req: any, res: any) {
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
@@ -63,62 +130,27 @@ export default async function handler(req: any, res: any) {
       return res.status(400).json({ error: "Missing owner address" });
     }
 
-    const payload = {
-      jsonrpc: "2.0",
-      id: Date.now(),
-      method: "getTokenAccountsByOwner",
-      params: [owner, { programId: "" }, { encoding: "jsonParsed", commitment: "confirmed" }]
-    };
-
-    const programIds = [
-      "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
-      "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
-    ];
-
-    const discovered: ScanAccount[] = [];
-    const nonEmptyAccounts: ScanAccount[] = [];
-
-    for (const programId of programIds) {
-      payload.params[1] = { programId };
-      const json = await callRpcWithRetry(payload);
-
-      const items = (json?.result?.value ?? []) as any[];
-      for (const tokenAccount of items) {
-        const parsedInfo = tokenAccount?.account?.data?.parsed?.info;
-        if (!parsedInfo?.tokenAmount) {
-          continue;
-        }
-
-        const amountRaw = String(parsedInfo.tokenAmount.amount ?? "0");
-        const uiAmountFromString = Number(parsedInfo.tokenAmount.uiAmountString ?? "0");
-        const decimals = Number(parsedInfo.tokenAmount.decimals ?? 0);
-        const uiAmount =
-          Number.isFinite(uiAmountFromString) && uiAmountFromString >= 0
-            ? uiAmountFromString
-            : typeof parsedInfo.tokenAmount.uiAmount === "number"
-              ? parsedInfo.tokenAmount.uiAmount
-              : Number(amountRaw) / 10 ** decimals;
-
-        const normalized: ScanAccount = {
-          address: String(tokenAccount?.pubkey ?? ""),
-          mint: String(parsedInfo.mint ?? ""),
-          lamports: Number(tokenAccount?.account?.lamports ?? 0),
-          programId,
-          amountRaw,
-          uiAmount,
-          uiAmountString: String(parsedInfo.tokenAmount.uiAmountString ?? "0"),
-          decimals
-        };
-
-        if (amountRaw === "0" || uiAmount === 0) {
-          discovered.push(normalized);
-        } else {
-          nonEmptyAccounts.push(normalized);
-        }
-      }
+    const now = Date.now();
+    const cached = scanCache.get(owner);
+    if (cached && now - cached.at < CACHE_TTL_MS) {
+      return res.status(200).json(cached.data);
     }
 
-    return res.status(200).json({ discovered, nonEmptyAccounts });
+    let running = inFlightScans.get(owner);
+    if (!running) {
+      running = scanOwner(owner)
+        .then((data) => {
+          scanCache.set(owner, { at: Date.now(), data });
+          return data;
+        })
+        .finally(() => {
+          inFlightScans.delete(owner);
+        });
+      inFlightScans.set(owner, running);
+    }
+
+    const data = await running;
+    return res.status(200).json(data);
   } catch (error) {
     return res.status(502).json({
       error: error instanceof Error ? error.message : "Scan failed"
