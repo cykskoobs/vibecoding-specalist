@@ -584,7 +584,7 @@ export default function App(): JSX.Element {
       setStatus(humanizeError(error));
     } finally {
       setBusy(false);
-      setCooldownSeconds(10);
+      setCooldownSeconds(15);
     }
   };
 
@@ -1074,6 +1074,7 @@ export default function App(): JSX.Element {
     </main>
   );
 }
+
 
 
 
