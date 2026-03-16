@@ -1,6 +1,6 @@
-﻿import { useRef, useState } from "react";
+﻿import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowRightLeft, Copy, Eye, Flame, LogOut, RefreshCw, Wallet } from "lucide-react";
+import { ArrowRightLeft, Copy, Eye, Flame, LogOut, RefreshCw, Send, Sparkles, Wallet, X } from "lucide-react";
 
 import { BackgroundPaths, BackgroundPathsBackdrop, BackgroundPathsLayer } from "@/components/ui/background-paths";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,12 @@ type DustTokenAccount = CloseableTokenAccount & {
 };
 
 type WalletId = "phantom" | "jupiter";
+
+type ChatMessage = {
+  id: string;
+  role: "user" | "bot";
+  text: string;
+};
 
 type PhantomProvider = {
   isPhantom?: boolean;
@@ -62,6 +68,36 @@ const RPC_ENDPOINTS: string[] = [
   "https://solana-rpc.publicnode.com",
   "https://rpc.ankr.com/solana"
 ].filter((endpoint) => Boolean(endpoint));
+
+const CYKUBA_SUGGESTIONS = [
+  "How does SOL reclaim work?",
+  "Where does reclaimed SOL come from?",
+  "Is this safe to use?",
+  "How can I verify transactions myself?",
+  "What are worthless tokens and why optional?"
+];
+
+function getCykubaReply(question: string): string {
+  const q = question.toLowerCase();
+
+  if (q.includes("how") && q.includes("work")) {
+    return "Cykuba: You connect a wallet, scan token accounts, then close empty token accounts. Closing returns the rent deposit (about ~0.002 SOL each) back to the wallet owner.";
+  }
+  if (q.includes("where") && q.includes("sol")) {
+    return "Cykuba: The SOL comes from rent deposits already locked in your own empty token accounts on Solana. This app does not mint SOL or pull from another wallet.";
+  }
+  if (q.includes("safe") || q.includes("scam")) {
+    return "Cykuba: Review each wallet popup before approving. You should only approve transactions that close your token accounts and return rent to your own address.";
+  }
+  if (q.includes("verify") || q.includes("prove")) {
+    return "Cykuba: Verify signatures in a Solana explorer and confirm the destination address is your wallet. You can also compare balances before and after reclaim.";
+  }
+  if (q.includes("worthless") || q.includes("burn") || q.includes("optional")) {
+    return "Cykuba: Worthless-token burn is optional. It targets low-value tokens (<$3) and may reclaim rent from related token accounts. Leave it off if you want to keep everything.";
+  }
+
+  return "Cykuba: I can help with reclaim flow, safety checks, wallet connection, and on-chain verification.";
+}
 
 const WALLET_OPTIONS: Array<{ id: WalletId; name: string; logoUrl: string; logoAlt: string }> = [
   {
@@ -169,6 +205,9 @@ function getProvider(walletId: WalletId): PhantomProvider | null {
 
       for (const candidate of candidates) {
         if (isJupiterProvider(candidate)) {
+          return candidate;
+        }
+        if (isProvider(candidate) && !(candidate as PhantomProvider).isPhantom) {
           return candidate;
         }
       }
@@ -295,7 +334,14 @@ export default function App(): JSX.Element {
   const [activeEndpoint, setActiveEndpoint] = useState<string>(RPC_ENDPOINTS[0]);
   const [claimFx, setClaimFx] = useState<{ show: boolean; amount: string }>({ show: false, amount: "0" });
   const [showWorthlessTools, setShowWorthlessTools] = useState<boolean>(false);
-    const [claimReceipt, setClaimReceipt] = useState<{ open: boolean; amount: string }>({ open: false, amount: "0" });
+  const [cooldownSeconds, setCooldownSeconds] = useState<number>(0);
+  const [claimReceipt, setClaimReceipt] = useState<{ open: boolean; amount: string }>({ open: false, amount: "0" });
+  const [chatOpen, setChatOpen] = useState<boolean>(false);
+  const [chatTyping, setChatTyping] = useState<boolean>(false);
+  const [chatInput, setChatInput] = useState<string>("");
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
+    { id: "bot-welcome", role: "bot", text: "Cykuba here. Ask anything about how reclaim works, where SOL comes from, and safety checks." }
+  ]);
   const lastScanRef = useRef<{
     owner: string;
     at: number;
@@ -309,7 +355,19 @@ export default function App(): JSX.Element {
   const dustRentSol = (dustRentLamports / LAMPORTS_PER_SOL).toFixed(6);
   const canClaim = walletAddress.length > 0 && walletAddress === scannedOwner && accounts.length > 0;
   const canBurnDust = walletAddress.length > 0 && walletAddress === scannedOwner && dustAccounts.length > 0;
-    const playClaimDing = (): void => {
+  const scanLocked = busy || cooldownSeconds > 0;
+
+  useEffect(() => {
+    if (cooldownSeconds <= 0) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      setCooldownSeconds((current) => (current > 0 ? current - 1 : 0));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [cooldownSeconds]);
+
+  const playClaimDing = (): void => {
     if (typeof window === "undefined") {
       return;
     }
@@ -591,15 +649,18 @@ export default function App(): JSX.Element {
       setStatus(humanizeError(error));
     } finally {
       setBusy(false);
+      setCooldownSeconds(15);
     }
   };
 
   const connectWallet = async (walletId: WalletId): Promise<void> => {
     let targetProvider = getProvider(walletId);
     if (!targetProvider && walletId === "jupiter") {
-      pokeWalletDiscovery();
-      await new Promise((resolve) => setTimeout(resolve, 450));
-      targetProvider = getProvider(walletId);
+      for (let attempt = 0; attempt < 5 && !targetProvider; attempt += 1) {
+        pokeWalletDiscovery();
+        await new Promise((resolve) => setTimeout(resolve, 350));
+        targetProvider = getProvider(walletId);
+      }
     }
     if (!targetProvider) {
       if (walletId === "jupiter") {
@@ -714,6 +775,7 @@ export default function App(): JSX.Element {
       setStatus(humanizeError(error));
     } finally {
       setBusy(false);
+      setCooldownSeconds(15);
     }
   };
 
@@ -794,6 +856,7 @@ export default function App(): JSX.Element {
       setStatus(humanizeError(error));
     } finally {
       setBusy(false);
+      setCooldownSeconds(15);
     }
   };
 
@@ -807,6 +870,33 @@ export default function App(): JSX.Element {
     } catch {
       setStatus("Clipboard permission blocked.");
     }
+  };
+
+  const askCykuba = (question: string): void => {
+    const trimmed = question.trim();
+    if (!trimmed || chatTyping) {
+      return;
+    }
+
+    const userMessage: ChatMessage = {
+      id: `user-${Date.now()}`,
+      role: "user",
+      text: trimmed
+    };
+
+    setChatMessages((current) => [...current, userMessage]);
+    setChatInput("");
+    setChatTyping(true);
+
+    window.setTimeout(() => {
+      const botMessage: ChatMessage = {
+        id: `bot-${Date.now()}`,
+        role: "bot",
+        text: getCykubaReply(trimmed)
+      };
+      setChatMessages((current) => [...current, botMessage]);
+      setChatTyping(false);
+    }, 850);
   };
 
   return (
@@ -932,9 +1022,9 @@ export default function App(): JSX.Element {
               disabled={busy}
             />
 
-            <Button variant="ghost" onClick={() => scanAccounts(addressInput.trim() || walletAddress)} disabled={busy} className="h-12 rounded-xl border border-cyan-100/25 bg-white/10 px-5 text-cyan-50 hover:bg-white/20 disabled:opacity-60">
+            <Button variant="ghost" onClick={() => scanAccounts(addressInput.trim() || walletAddress)} disabled={scanLocked} className="h-12 rounded-xl border border-cyan-100/25 bg-white/10 px-5 text-cyan-50 hover:bg-white/20 disabled:opacity-60">
               <Eye className="mr-2 h-4 w-4" />
-              Preview
+              {cooldownSeconds > 0 ? `Preview (${cooldownSeconds}s)` : "Preview"}
             </Button>
 
             <Button disabled className="h-12 rounded-xl bg-slate-800/70 px-5 font-semibold text-cyan-100/70">
@@ -968,9 +1058,9 @@ export default function App(): JSX.Element {
 
             {walletAddress ? (
               <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                <Button onClick={() => scanAccounts(walletAddress)} disabled={busy} className="h-11 rounded-xl bg-gradient-to-r from-[#00FFA3] to-[#7B5CFF] font-semibold text-[#041629] hover:opacity-90">
+                <Button onClick={() => scanAccounts(walletAddress)} disabled={scanLocked} className="h-11 rounded-xl bg-gradient-to-r from-[#00FFA3] to-[#7B5CFF] font-semibold text-[#041629] hover:opacity-90">
                   <RefreshCw className="mr-2 h-4 w-4" />
-                  Rescan Wallet
+                  {cooldownSeconds > 0 ? `Rescan Wallet (${cooldownSeconds}s)` : "Rescan Wallet"}
                 </Button>
                 <Button onClick={claimAll} disabled={!canClaim || busy} className="h-11 rounded-xl bg-gradient-to-r from-[#00FFA3] to-[#7B5CFF] font-semibold text-[#041629] hover:opacity-90">
                   <ArrowRightLeft className="mr-2 h-4 w-4" />
@@ -1075,10 +1165,127 @@ export default function App(): JSX.Element {
         </AnimatePresence>
       </section>
 
+      <div className="fixed bottom-4 right-4 z-40 sm:bottom-6 sm:right-6">
+        <AnimatePresence>
+          {chatOpen ? (
+            <motion.div
+              initial={{ opacity: 0, y: 16, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 12, scale: 0.97 }}
+              className="mb-3 w-[min(92vw,380px)] overflow-hidden rounded-2xl border border-cyan-300/30 bg-[#07152b]/95 shadow-neon backdrop-blur"
+            >
+              <div className="flex items-center justify-between border-b border-cyan-200/20 bg-gradient-to-r from-[#00FFA3]/15 via-[#59E2FF]/10 to-[#A86BFF]/15 px-4 py-3">
+                <div>
+                  <p className="text-sm font-semibold text-cyan-50">Cykuba</p>
+                  <p className="text-xs text-cyan-100/70">SOL Reclaimer assistant</p>
+                </div>
+                <button
+                  onClick={() => setChatOpen(false)}
+                  className="rounded-md p-1 text-cyan-100/80 hover:bg-white/10 hover:text-cyan-50"
+                  aria-label="Close Cykuba"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="max-h-72 space-y-2 overflow-y-auto px-3 py-3">
+                {chatMessages.map((message) => (
+                  <div key={message.id} className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}>
+                    <div
+                      className={`max-w-[88%] rounded-xl px-3 py-2 text-sm ${
+                        message.role === "user"
+                          ? "bg-gradient-to-r from-[#00FFA3] to-[#7B5CFF] text-[#03172a]"
+                          : "border border-cyan-200/20 bg-[#0b1e39] text-cyan-50"
+                      }`}
+                    >
+                      {message.text}
+                    </div>
+                  </div>
+                ))}
+
+                {chatTyping ? (
+                  <div className="flex justify-start">
+                    <div className="flex items-center gap-1 rounded-xl border border-cyan-200/20 bg-[#0b1e39] px-3 py-2">
+                      <motion.span className="h-1.5 w-1.5 rounded-full bg-cyan-200" animate={{ opacity: [0.3, 1, 0.3] }} transition={{ duration: 0.9, repeat: Infinity, delay: 0 }} />
+                      <motion.span className="h-1.5 w-1.5 rounded-full bg-cyan-200" animate={{ opacity: [0.3, 1, 0.3] }} transition={{ duration: 0.9, repeat: Infinity, delay: 0.15 }} />
+                      <motion.span className="h-1.5 w-1.5 rounded-full bg-cyan-200" animate={{ opacity: [0.3, 1, 0.3] }} transition={{ duration: 0.9, repeat: Infinity, delay: 0.3 }} />
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="border-t border-cyan-200/20 px-3 py-2">
+                <div className="mb-2 flex flex-wrap gap-1.5">
+                  {CYKUBA_SUGGESTIONS.slice(0, 4).map((question) => (
+                    <button
+                      key={question}
+                      type="button"
+                      onClick={() => askCykuba(question)}
+                      disabled={chatTyping}
+                      className="rounded-full border border-cyan-200/25 bg-white/5 px-2.5 py-1 text-[11px] text-cyan-100/85 hover:bg-white/10 disabled:opacity-60"
+                    >
+                      {question}
+                    </button>
+                  ))}
+                </div>
+                <form
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    askCykuba(chatInput);
+                  }}
+                  className="flex items-center gap-2"
+                >
+                  <input
+                    value={chatInput}
+                    onChange={(event) => setChatInput(event.target.value)}
+                    placeholder="Ask Cykuba..."
+                    className="h-9 flex-1 rounded-lg border border-cyan-200/25 bg-[#081a34] px-3 text-sm text-cyan-50 placeholder:text-cyan-100/40 focus:outline-none focus:ring-2 focus:ring-cyan-300/40"
+                  />
+                  <button
+                    type="submit"
+                    disabled={chatTyping || !chatInput.trim()}
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-r from-[#00FFA3] to-[#7B5CFF] text-[#03172a] disabled:opacity-60"
+                    aria-label="Send message"
+                  >
+                    <Send className="h-4 w-4" />
+                  </button>
+                </form>
+              </div>
+            </motion.div>
+          ) : null}
+        </AnimatePresence>
+
+        <button
+          type="button"
+          onClick={() => setChatOpen((open) => !open)}
+          className="inline-flex items-center gap-2 rounded-full border border-cyan-300/40 bg-gradient-to-r from-[#00FFA3] to-[#7B5CFF] px-4 py-2.5 text-sm font-semibold text-[#041629] shadow-neon"
+        >
+          <Sparkles className="h-4 w-4" />
+          {chatOpen ? "Hide Cykuba" : "Ask Cykuba"}
+        </button>
+      </div>
+
       <footer className="pb-3 text-center text-xs text-cyan-100/65">Copyright 2026 SOL Reclaimer</footer>
     </main>
   );
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
