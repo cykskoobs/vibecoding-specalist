@@ -50,7 +50,8 @@ declare global {
 const COMMITMENT = "confirmed";
 const LAMPORTS_PER_SOL = 1_000_000_000;
 const DUST_THRESHOLD_USD = 3;
-const APP_RPC_PROXY = "/api/solana-rpc";
+const APP_RPC_PROXY =
+  typeof window !== "undefined" ? `${window.location.origin}/api/solana-rpc` : "https://api.mainnet-beta.solana.com";
 const CUSTOM_RPC_RAW = (import.meta.env.VITE_SOLANA_RPC as string | undefined)?.trim() ?? "";
 const CUSTOM_RPC = /^https?:\/\//i.test(CUSTOM_RPC_RAW) ? CUSTOM_RPC_RAW : "";
 const RPC_ENDPOINTS: string[] = [
@@ -99,6 +100,34 @@ function isJupiterProvider(value: unknown): value is PhantomProvider {
   const provider = value as PhantomProvider;
   return !provider.isPhantom;
 }
+function findJupiterProviderFromWindow(win: Window): PhantomProvider | null {
+  const anyWindow = win as unknown as Record<string, unknown>;
+  const solanaAny = win.solana as unknown as { providers?: unknown[]; isPhantom?: boolean } | undefined;
+  const providerList = Array.isArray(solanaAny?.providers) ? solanaAny.providers : [];
+
+  for (const provider of providerList) {
+    if (isJupiterProvider(provider)) {
+      return provider;
+    }
+  }
+
+  for (const [key, value] of Object.entries(anyWindow)) {
+    if (!key.toLowerCase().includes("jupiter")) {
+      continue;
+    }
+
+    if (isJupiterProvider(value)) {
+      return value;
+    }
+
+    const nested = (value as { solana?: unknown } | null)?.solana;
+    if (isJupiterProvider(nested)) {
+      return nested;
+    }
+  }
+
+  return null;
+}
 function shortKey(value: string): string {
   return `${value.slice(0, 4)}...${value.slice(-4)}`;
 }
@@ -130,6 +159,11 @@ function getProvider(walletId: WalletId): PhantomProvider | null {
 
       if (isProvider(window.solana) && !window.solana?.isPhantom) {
         return window.solana;
+      }
+
+      const discovered = findJupiterProviderFromWindow(window);
+      if (discovered) {
+        return discovered;
       }
 
       return null;
@@ -820,6 +854,13 @@ export default function App(): JSX.Element {
     </main>
   );
 }
+
+
+
+
+
+
+
 
 
 
