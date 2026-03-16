@@ -110,7 +110,7 @@ export function BackgroundPaths({
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_12%_20%,rgba(0,255,163,0.2),transparent_35%),radial-gradient(circle_at_86%_5%,rgba(123,92,255,0.25),transparent_28%)]" />
       <BackgroundPathsLayer className="!opacity-100" />
 
-      <div className="relative z-10 mx-auto max-w-4xl px-4 py-12 text-center md:px-8 md:py-16">
+      <div className="relative z-10 mx-auto max-w-4xl px-4 py-8 text-center md:px-8 md:py-10">
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 1.2 }}>
           <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-cyan-200/30 bg-cyan-200/10 px-4 py-1 text-xs font-medium tracking-wide text-cyan-100">
             <Sparkles className="h-3.5 w-3.5" />
@@ -119,7 +119,7 @@ export function BackgroundPaths({
 
           <div className="mb-6 flex items-center justify-center gap-3">
             <SolanaMark className="h-10 w-10" />
-            <h1 aria-label={title} className="text-4xl font-bold tracking-tight text-white sm:text-6xl md:text-7xl">
+            <h1 aria-label={title} className="text-4xl font-bold tracking-tight text-white sm:text-5xl md:text-6xl">
               {words.map((word, wordIndex) => (
                 <span key={wordIndex} className="mr-3 inline-block last:mr-0">
                   {word.split("").map((letter, letterIndex) => (
@@ -143,7 +143,7 @@ export function BackgroundPaths({
             </h1>
           </div>
 
-          <p className="mx-auto max-w-2xl text-base text-cyan-50/80 sm:text-lg">{subtitle}</p>
+          <p className="mx-auto max-w-2xl text-sm text-cyan-50/80 sm:text-base">{subtitle}</p>
 
           {showButton ? (
             <div className="mt-8 inline-block rounded-2xl border border-cyan-100/25 bg-white/10 p-1 shadow-lg backdrop-blur-xl">
@@ -162,3 +162,4 @@ export function BackgroundPaths({
     </div>
   );
 }
+

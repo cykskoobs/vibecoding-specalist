@@ -962,7 +962,7 @@ export default function App(): JSX.Element {
   };
 
   return (
-    <main className="relative mx-auto grid min-h-screen w-full max-w-6xl grid-rows-[auto_minmax(0,1fr)_auto] gap-3 overflow-x-hidden px-3 py-3 sm:px-5 sm:py-4">
+    <main className="relative mx-auto grid h-screen w-full max-w-6xl grid-rows-[auto_minmax(0,1fr)] gap-2 overflow-hidden px-2 py-2 sm:px-4 sm:py-3">
       <BackgroundPathsBackdrop />
       <div className="fixed right-4 top-4 z-40 sm:right-6 sm:top-6">
         <div className="inline-flex items-center gap-2 rounded-full border border-emerald-300/45 bg-[#08172d]/85 px-3 py-1.5 text-xs font-semibold text-cyan-50 shadow-neon backdrop-blur">
@@ -984,7 +984,7 @@ export default function App(): JSX.Element {
 
       <section
         id="reclaimer"
-        className="relative min-h-0 overflow-hidden rounded-3xl border border-cyan-300/30 bg-card p-5 shadow-neon sm:p-7"
+        className="relative h-full min-h-0 overflow-hidden rounded-3xl border border-cyan-300/30 bg-card p-4 shadow-neon sm:p-6"
       >
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_15%_15%,rgba(0,255,163,0.08),transparent_35%),radial-gradient(circle_at_85%_5%,rgba(125,95,255,0.1),transparent_35%)]" />
         <BackgroundPathsLayer className="!opacity-45" />
@@ -1353,10 +1353,11 @@ export default function App(): JSX.Element {
         </button>
       </div>
 
-      <footer className="pb-3 text-center text-xs text-cyan-100/65">Copyright 2026 SOL Reclaimer</footer>
+      <footer className="fixed bottom-2 left-1/2 z-30 -translate-x-1/2 text-center text-[11px] text-cyan-100/65">Copyright 2026 SOL Reclaimer</footer>
     </main>
   );
 }
+
 
 
 
