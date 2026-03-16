@@ -1,4 +1,4 @@
-ï»¿import { useState } from "react";
+import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { ArrowRightLeft, Copy, Eye, Flame, LogOut, RefreshCw, Wallet } from "lucide-react";
 
@@ -97,9 +97,20 @@ function isJupiterProvider(value: unknown): value is PhantomProvider {
     return false;
   }
 
-  const provider = value as PhantomProvider;
-  return !provider.isPhantom;
+  const provider = value as PhantomProvider & {
+    name?: string;
+    walletName?: string;
+    adapter?: { name?: string };
+    isJupiter?: boolean;
+  };
+  if (provider.isJupiter) {
+    return true;
+  }
+
+  const nameBlob = `${provider.name ?? ""} ${provider.walletName ?? ""} ${provider.adapter?.name ?? ""}`.toLowerCase();
+  return nameBlob.includes("jupiter");
 }
+
 function findJupiterProviderFromWindow(win: Window): PhantomProvider | null {
   const anyWindow = win as unknown as Record<string, unknown>;
   const solanaAny = win.solana as unknown as { providers?: unknown[]; isPhantom?: boolean } | undefined;
@@ -143,12 +154,17 @@ function getProvider(walletId: WalletId): PhantomProvider | null {
     }
 
     if (walletId === "jupiter") {
+      const anyWindow = window as unknown as Record<string, unknown>;
       const candidates: unknown[] = [
         window.jupiter?.solana,
         window.jup?.solana,
         window.jupiterWallet?.solana,
         window.jupiter as unknown,
-        window.jup as unknown
+        window.jup as unknown,
+        (anyWindow.jupiter as { provider?: unknown; solana?: unknown } | undefined)?.provider,
+        (anyWindow.jupiterWallet as { provider?: unknown; solana?: unknown } | undefined)?.provider,
+        (anyWindow.JupiterWallet as { provider?: unknown; solana?: unknown } | undefined)?.provider,
+        (anyWindow["jupiter-wallet"] as { provider?: unknown; solana?: unknown } | undefined)?.provider
       ];
 
       for (const candidate of candidates) {
@@ -157,7 +173,7 @@ function getProvider(walletId: WalletId): PhantomProvider | null {
         }
       }
 
-      if (isProvider(window.solana) && !window.solana?.isPhantom) {
+      if (isProvider(window.solana) && ((window.solana as PhantomProvider & { isJupiter?: boolean }).isJupiter || !window.solana?.isPhantom)) {
         return window.solana;
       }
 
@@ -271,12 +287,12 @@ export default function App(): JSX.Element {
   const [activeEndpoint, setActiveEndpoint] = useState<string>(RPC_ENDPOINTS[0]);
   const [claimFx, setClaimFx] = useState<{ show: boolean; amount: string }>({ show: false, amount: "0" });
   const [showWorthlessTools, setShowWorthlessTools] = useState<boolean>(false);
+  const [scanCooldown, setScanCooldown] = useState<boolean>(false);
 
   const reclaimLamports = accounts.reduce((sum, account) => sum + account.lamports, 0);
   const reclaimSol = (reclaimLamports / LAMPORTS_PER_SOL).toFixed(6);
   const dustRentLamports = dustAccounts.reduce((sum, account) => sum + account.lamports, 0);
   const dustRentSol = (dustRentLamports / LAMPORTS_PER_SOL).toFixed(6);
-  const dustUsdValue = dustAccounts.reduce((sum, account) => sum + account.usdValue, 0).toFixed(2);
   const canClaim = walletAddress.length > 0 && walletAddress === scannedOwner && accounts.length > 0;
   const canBurnDust = walletAddress.length > 0 && walletAddress === scannedOwner && dustAccounts.length > 0;
 
@@ -521,12 +537,19 @@ export default function App(): JSX.Element {
       setStatus(humanizeError(error));
     } finally {
       setBusy(false);
+      setScanCooldown(true);
+      setTimeout(() => setScanCooldown(false), 5000);
     }
   };
+
   const connectWallet = async (walletId: WalletId): Promise<void> => {
     const targetProvider = getProvider(walletId);
     if (!targetProvider) {
-      setStatus(`${WALLET_OPTIONS.find((wallet) => wallet.id === walletId)?.name ?? "Wallet"} extension not detected.`);
+      if (walletId === "jupiter") {
+        setStatus("Jupiter extension not detected. Unlock Jupiter Wallet, refresh this page, then click Jupiter again.");
+      } else {
+        setStatus(`${WALLET_OPTIONS.find((wallet) => wallet.id === walletId)?.name ?? "Wallet"} extension not detected.`);
+      }
       return;
     }
 
@@ -849,22 +872,15 @@ export default function App(): JSX.Element {
               disabled={busy}
             />
 
-            <Button variant="ghost" onClick={() => scanAccounts(addressInput.trim() || walletAddress)} disabled={busy} className="h-12 rounded-xl border border-cyan-100/25 bg-white/10 px-5 text-cyan-50 hover:bg-white/20">
+            <Button variant="ghost" onClick={() => scanAccounts(addressInput.trim() || walletAddress)} disabled={busy || scanCooldown} className="h-12 rounded-xl border border-cyan-100/25 bg-white/10 px-5 text-cyan-50 hover:bg-white/20 disabled:opacity-60">
               <Eye className="mr-2 h-4 w-4" />
               Preview
             </Button>
 
-            {!walletAddress ? (
-              <Button disabled className="h-12 rounded-xl bg-slate-800/70 px-5 font-semibold text-cyan-100/70">
-                <Wallet className="mr-2 h-4 w-4" />
-                Click wallet card above
-              </Button>
-            ) : (
-              <Button onClick={claimAll} disabled={!canClaim || busy} className="h-12 rounded-xl bg-gradient-to-r from-[#00FFA3] to-[#7B5CFF] px-5 font-semibold text-slate-900 hover:opacity-90">
-                <ArrowRightLeft className="mr-2 h-4 w-4" />
-                Claim Empty Accounts
-              </Button>
-            )}
+            <Button disabled className="h-12 rounded-xl bg-slate-800/70 px-5 font-semibold text-cyan-100/70">
+              <Wallet className="mr-2 h-4 w-4" />
+              {walletAddress ? "Connected" : "Click wallet card above"}
+            </Button>
           </div>
 
           <div className="relative overflow-hidden rounded-2xl border border-cyan-100/20 bg-[#071426]/80 p-6 text-center">
@@ -887,12 +903,12 @@ export default function App(): JSX.Element {
               <SolanaLogo />
               <p className="text-5xl font-bold text-[#00FFA3]">{reclaimSol} <span className="text-3xl text-cyan-200/70">SOL</span></p>
             </div>
-            <p className="mt-2 text-cyan-100/70">â€¢ Empty account reclaim: {reclaimSol} SOL ({accounts.length} accounts)</p>
-            <p className="mt-1 text-cyan-100/70">â€¢ Worthless token reclaim: {dustRentSol} SOL ({dustAccounts.length} tokens, {dustUsdValue} USD tracked)</p>
+            <p className="mt-2 text-cyan-100/70">• Empty account reclaim: {reclaimSol} SOL ({accounts.length} accounts)</p>
+            <p className="mt-1 text-cyan-100/70">• Worthless token reclaim: {dustRentSol} SOL ({dustAccounts.length} tokens)</p>
 
             {walletAddress ? (
               <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                <Button onClick={() => scanAccounts(walletAddress)} disabled={busy} className="h-11 rounded-xl bg-gradient-to-r from-[#00FFA3] to-[#7B5CFF] font-semibold text-[#041629] hover:opacity-90">
+                <Button onClick={() => scanAccounts(walletAddress)} disabled={busy || scanCooldown} className="h-11 rounded-xl bg-gradient-to-r from-[#00FFA3] to-[#7B5CFF] font-semibold text-[#041629] hover:opacity-90">
                   <RefreshCw className="mr-2 h-4 w-4" />
                   Rescan Wallet
                 </Button>
@@ -913,7 +929,7 @@ export default function App(): JSX.Element {
                     className="h-4 w-4 accent-[#00FFA3]"
                     disabled={busy}
                   />
-                  Optional: Manage worthless tokens
+                  Optional: Burn worthless tokens
                 </label>
 
                 {showWorthlessTools ? (
@@ -925,7 +941,7 @@ export default function App(): JSX.Element {
                         className="h-10 rounded-xl bg-gradient-to-r from-[#24f2c2] to-[#8d7cff] text-[#041629] hover:opacity-90"
                       >
                         <Flame className="mr-2 h-4 w-4" />
-                        Burn Worthless Tokens + Reclaim ({dustRentSol} SOL)
+                        Burn Worthless Tokens (&lt;$3 USD) + Reclaim ({dustRentSol} SOL)
                       </Button>
                     ) : (
                       <p className="text-xs text-cyan-100/70">
@@ -948,6 +964,22 @@ export default function App(): JSX.Element {
     </main>
   );
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

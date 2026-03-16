@@ -1,4 +1,11 @@
-﻿const RPC_URL = process.env.SOLANA_RPC_URL || process.env.VITE_SOLANA_RPC || "https://api.mainnet-beta.solana.com";
+const PRIMARY_RPC = process.env.SOLANA_RPC_URL || process.env.VITE_SOLANA_RPC || "";
+const RPC_URLS = [
+  PRIMARY_RPC,
+  "https://api.mainnet-beta.solana.com",
+  "https://solana.public-rpc.com",
+  "https://solana-rpc.publicnode.com",
+  "https://rpc.ankr.com/solana"
+].filter((url, index, all) => Boolean(url) && all.indexOf(url) === index);
 
 type ScanAccount = {
   address: string;
@@ -16,25 +23,27 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 async function callRpcWithRetry(payload: unknown) {
   let lastError: unknown = null;
 
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    try {
-      const upstream = await fetch(RPC_URL, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(payload)
-      });
+  for (const endpoint of RPC_URLS) {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const upstream = await fetch(endpoint, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(payload)
+        });
 
-      const raw = await upstream.text();
-      const json = JSON.parse(raw);
+        const raw = await upstream.text();
+        const json = JSON.parse(raw);
 
-      if (!upstream.ok || json?.error) {
-        throw new Error(json?.error?.message ?? `rpc-http-${upstream.status}`);
+        if (!upstream.ok || json?.error) {
+          throw new Error(json?.error?.message ?? `rpc-http-${upstream.status}`);
+        }
+
+        return json;
+      } catch (error) {
+        lastError = error;
+        await sleep(250 * (attempt + 1));
       }
-
-      return json;
-    } catch (error) {
-      lastError = error;
-      await sleep(250 * (attempt + 1));
     }
   }
 
