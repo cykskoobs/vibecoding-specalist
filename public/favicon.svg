@@ -1,0 +1,19 @@
+﻿<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="solGrad1" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#39FFD4"/>
+      <stop offset="1" stop-color="#6DEBFF"/>
+    </linearGradient>
+    <linearGradient id="solGrad2" x1="8" y1="20" x2="56" y2="60" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#62D6FF"/>
+      <stop offset="1" stop-color="#8E7CFF"/>
+    </linearGradient>
+    <linearGradient id="solGrad3" x1="8" y1="30" x2="56" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7B9CFF"/>
+      <stop offset="1" stop-color="#B26CFF"/>
+    </linearGradient>
+  </defs>
+  <rect x="6" y="10" width="52" height="11" rx="5.5" fill="url(#solGrad1)" transform="skewX(-18)"/>
+  <rect x="6" y="27" width="52" height="11" rx="5.5" fill="url(#solGrad2)" transform="skewX(-18)"/>
+  <rect x="6" y="44" width="52" height="11" rx="5.5" fill="url(#solGrad3)" transform="skewX(-18)"/>
+</svg>

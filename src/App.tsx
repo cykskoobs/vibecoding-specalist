@@ -1,6 +1,6 @@
 ﻿import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowRightLeft, Copy, Eye, Flame, LogOut, RefreshCw, Send, Sparkles, Wallet, X } from "lucide-react";
+import { ArrowRightLeft, Copy, Eye, Flame, LogOut, RefreshCw, Send, Sparkles, Users, Wallet, X } from "lucide-react";
 
 import { BackgroundPaths, BackgroundPathsBackdrop, BackgroundPathsLayer } from "@/components/ui/background-paths";
 import { Button } from "@/components/ui/button";
@@ -76,27 +76,29 @@ const CYKUBA_SUGGESTIONS = [
   "How can I verify transactions myself?",
   "What are worthless tokens and why optional?"
 ];
+const CYKUBA_AVATAR_URL =
+  "https://pbs.twimg.com/profile_images/1870397360037367808/GmBXi9XR_400x400.jpg";
 
 function getCykubaReply(question: string): string {
   const q = question.toLowerCase();
 
   if (q.includes("how") && q.includes("work")) {
-    return "Cykuba: You connect a wallet, scan token accounts, then close empty token accounts. Closing returns the rent deposit (about ~0.002 SOL each) back to the wallet owner.";
+    return "You connect a wallet, scan token accounts, then close empty token accounts. Closing returns the rent deposit (about ~0.002 SOL each) back to the wallet owner.";
   }
   if (q.includes("where") && q.includes("sol")) {
-    return "Cykuba: The SOL comes from rent deposits already locked in your own empty token accounts on Solana. This app does not mint SOL or pull from another wallet.";
+    return "The SOL comes from rent deposits already locked in your own empty token accounts on Solana. This app does not mint SOL or pull from another wallet.";
   }
   if (q.includes("safe") || q.includes("scam")) {
-    return "Cykuba: Review each wallet popup before approving. You should only approve transactions that close your token accounts and return rent to your own address.";
+    return "Review each wallet popup before approving. You should only approve transactions that close your token accounts and return rent to your own address.";
   }
   if (q.includes("verify") || q.includes("prove")) {
-    return "Cykuba: Verify signatures in a Solana explorer and confirm the destination address is your wallet. You can also compare balances before and after reclaim.";
+    return "Verify signatures in a Solana explorer and confirm the destination address is your wallet. You can also compare balances before and after reclaim.";
   }
   if (q.includes("worthless") || q.includes("burn") || q.includes("optional")) {
-    return "Cykuba: Worthless-token burn is optional. It targets low-value tokens (<$3) and may reclaim rent from related token accounts. Leave it off if you want to keep everything.";
+    return "Worthless-token burn is optional. It targets low-value tokens (<$3) and may reclaim rent from related token accounts. Leave it off if you want to keep everything.";
   }
 
-  return "Cykuba: I can help with reclaim flow, safety checks, wallet connection, and on-chain verification.";
+  return "I can help with reclaim flow, safety checks, wallet connection, and on-chain verification.";
 }
 
 const WALLET_OPTIONS: Array<{ id: WalletId; name: string; logoUrl: string; logoAlt: string }> = [
@@ -339,9 +341,11 @@ export default function App(): JSX.Element {
   const [chatOpen, setChatOpen] = useState<boolean>(false);
   const [chatTyping, setChatTyping] = useState<boolean>(false);
   const [chatInput, setChatInput] = useState<string>("");
+  const [activeUsers, setActiveUsers] = useState<number>(1);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
     { id: "bot-welcome", role: "bot", text: "Cykuba here. Ask anything about how reclaim works, where SOL comes from, and safety checks." }
   ]);
+  const presenceSessionRef = useRef<string>("");
   const lastScanRef = useRef<{
     owner: string;
     at: number;
@@ -356,6 +360,7 @@ export default function App(): JSX.Element {
   const canClaim = walletAddress.length > 0 && walletAddress === scannedOwner && accounts.length > 0;
   const canBurnDust = walletAddress.length > 0 && walletAddress === scannedOwner && dustAccounts.length > 0;
   const scanLocked = busy || cooldownSeconds > 0;
+  const userAvatarUrl = `https://api.dicebear.com/9.x/identicon/svg?seed=${encodeURIComponent(walletAddress || "guest-user")}`;
 
   useEffect(() => {
     if (cooldownSeconds <= 0) {
@@ -366,6 +371,63 @@ export default function App(): JSX.Element {
     }, 1000);
     return () => window.clearInterval(timer);
   }, [cooldownSeconds]);
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    if (!presenceSessionRef.current) {
+      presenceSessionRef.current =
+        typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+          ? crypto.randomUUID()
+          : `session-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    }
+
+    const ping = async (leave = false) => {
+      try {
+        const response = await fetch("/api/presence", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            sessionId: presenceSessionRef.current,
+            wallet: walletAddress || null,
+            leave
+          }),
+          keepalive: leave
+        });
+
+        if (!response.ok) {
+          return;
+        }
+
+        const data = (await response.json()) as { activeUsers?: number };
+        if (typeof data.activeUsers === "number" && Number.isFinite(data.activeUsers)) {
+          setActiveUsers(Math.max(1, Math.floor(data.activeUsers)));
+        }
+      } catch {
+        // no-op
+      }
+    };
+
+    void ping(false);
+    const timer = window.setInterval(() => {
+      void ping(false);
+    }, 15000);
+
+    const visibilityHandler = () => {
+      if (document.visibilityState === "visible") {
+        void ping(false);
+      }
+    };
+
+    document.addEventListener("visibilitychange", visibilityHandler);
+
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", visibilityHandler);
+      void ping(true);
+    };
+  }, [walletAddress]);
 
   const playClaimDing = (): void => {
     if (typeof window === "undefined") {
@@ -902,6 +964,16 @@ export default function App(): JSX.Element {
   return (
     <main className="relative mx-auto grid min-h-screen w-full max-w-6xl grid-rows-[auto_minmax(0,1fr)_auto] gap-3 overflow-x-hidden px-3 py-3 sm:px-5 sm:py-4">
       <BackgroundPathsBackdrop />
+      <div className="fixed right-4 top-4 z-40 sm:right-6 sm:top-6">
+        <div className="inline-flex items-center gap-2 rounded-full border border-emerald-300/45 bg-[#08172d]/85 px-3 py-1.5 text-xs font-semibold text-cyan-50 shadow-neon backdrop-blur">
+          <span className="relative inline-flex h-2.5 w-2.5">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400/70" />
+            <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-400" />
+          </span>
+          <Users className="h-3.5 w-3.5 text-cyan-200" />
+          <span>{activeUsers} active</span>
+        </div>
+      </div>
 
       <BackgroundPaths
         title="SOL Reclaimer"
@@ -1165,7 +1237,7 @@ export default function App(): JSX.Element {
         </AnimatePresence>
       </section>
 
-      <div className="fixed bottom-4 right-4 z-40 sm:bottom-6 sm:right-6">
+      <div className="fixed bottom-4 right-4 z-40 flex flex-col items-end sm:bottom-6 sm:right-6">
         <AnimatePresence>
           {chatOpen ? (
             <motion.div
@@ -1188,11 +1260,19 @@ export default function App(): JSX.Element {
                 </button>
               </div>
 
-              <div className="max-h-72 space-y-2 overflow-y-auto px-3 py-3">
+              <div className="cykuba-scroll max-h-72 space-y-2 overflow-y-auto px-3 py-3">
                 {chatMessages.map((message) => (
-                  <div key={message.id} className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}>
+                  <div key={message.id} className={`flex items-end gap-2 ${message.role === "user" ? "justify-end" : "justify-start"}`}>
+                    {message.role === "bot" ? (
+                      <img
+                        src={CYKUBA_AVATAR_URL}
+                        alt="Cykuba avatar"
+                        className="h-7 w-7 rounded-full border border-cyan-300/35 object-cover"
+                        loading="lazy"
+                      />
+                    ) : null}
                     <div
-                      className={`max-w-[88%] rounded-xl px-3 py-2 text-sm ${
+                      className={`max-w-[82%] rounded-xl px-3 py-2 text-sm ${
                         message.role === "user"
                           ? "bg-gradient-to-r from-[#00FFA3] to-[#7B5CFF] text-[#03172a]"
                           : "border border-cyan-200/20 bg-[#0b1e39] text-cyan-50"
@@ -1200,6 +1280,14 @@ export default function App(): JSX.Element {
                     >
                       {message.text}
                     </div>
+                    {message.role === "user" ? (
+                      <img
+                        src={userAvatarUrl}
+                        alt="Your profile avatar"
+                        className="h-7 w-7 rounded-full border border-cyan-300/35 bg-[#0d233f] object-cover"
+                        loading="lazy"
+                      />
+                    ) : null}
                   </div>
                 ))}
 
@@ -1269,6 +1357,21 @@ export default function App(): JSX.Element {
     </main>
   );
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

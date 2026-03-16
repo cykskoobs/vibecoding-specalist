@@ -33,3 +33,29 @@
     font-family: "Space Grotesk", "Sora", "Segoe UI", sans-serif;
   }
 }
+
+@layer components {
+  .cykuba-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: #59e2ff rgba(7, 21, 43, 0.6);
+  }
+
+  .cykuba-scroll::-webkit-scrollbar {
+    width: 10px;
+  }
+
+  .cykuba-scroll::-webkit-scrollbar-track {
+    background: rgba(7, 21, 43, 0.55);
+    border-radius: 999px;
+  }
+
+  .cykuba-scroll::-webkit-scrollbar-thumb {
+    background: linear-gradient(180deg, #00ffa3, #59e2ff 55%, #a86bff);
+    border: 2px solid rgba(7, 21, 43, 0.9);
+    border-radius: 999px;
+  }
+
+  .cykuba-scroll::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(180deg, #2dffba, #78ecff 55%, #bc86ff);
+  }
+}
