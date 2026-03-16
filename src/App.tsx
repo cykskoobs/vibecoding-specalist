@@ -1,4 +1,4 @@
-import { useState } from "react";
+ï»¿import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { ArrowRightLeft, Copy, Eye, Flame, LogOut, RefreshCw, Wallet } from "lucide-react";
 
@@ -195,6 +195,14 @@ function isWalletDetected(walletId: WalletId): boolean {
   return Boolean(getProvider(walletId));
 }
 
+function pokeWalletDiscovery(): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.dispatchEvent(new Event("wallet-standard:app-ready"));
+  window.dispatchEvent(new Event("wallet-standard:register-wallet"));
+}
+
 function humanizeError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
 
@@ -287,7 +295,8 @@ export default function App(): JSX.Element {
   const [activeEndpoint, setActiveEndpoint] = useState<string>(RPC_ENDPOINTS[0]);
   const [claimFx, setClaimFx] = useState<{ show: boolean; amount: string }>({ show: false, amount: "0" });
   const [showWorthlessTools, setShowWorthlessTools] = useState<boolean>(false);
-  const [scanCooldown, setScanCooldown] = useState<boolean>(false);
+  const [cooldownSeconds, setCooldownSeconds] = useState<number>(0);
+  const [claimReceipt, setClaimReceipt] = useState<{ open: boolean; amount: string }>({ open: false, amount: "0" });
 
   const reclaimLamports = accounts.reduce((sum, account) => sum + account.lamports, 0);
   const reclaimSol = (reclaimLamports / LAMPORTS_PER_SOL).toFixed(6);
@@ -295,6 +304,44 @@ export default function App(): JSX.Element {
   const dustRentSol = (dustRentLamports / LAMPORTS_PER_SOL).toFixed(6);
   const canClaim = walletAddress.length > 0 && walletAddress === scannedOwner && accounts.length > 0;
   const canBurnDust = walletAddress.length > 0 && walletAddress === scannedOwner && dustAccounts.length > 0;
+  const scanLocked = busy || cooldownSeconds > 0;
+
+  useEffect(() => {
+    if (cooldownSeconds <= 0) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      setCooldownSeconds((current) => (current > 0 ? current - 1 : 0));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [cooldownSeconds]);
+
+  const playClaimDing = (): void => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    try {
+      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AudioCtx) {
+        return;
+      }
+      const audio = new AudioCtx();
+      const oscillator = audio.createOscillator();
+      const gain = audio.createGain();
+      oscillator.type = "sine";
+      oscillator.frequency.setValueAtTime(880, audio.currentTime);
+      oscillator.frequency.exponentialRampToValueAtTime(1320, audio.currentTime + 0.12);
+      gain.gain.setValueAtTime(0.0001, audio.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.18, audio.currentTime + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, audio.currentTime + 0.25);
+      oscillator.connect(gain);
+      gain.connect(audio.destination);
+      oscillator.start();
+      oscillator.stop(audio.currentTime + 0.26);
+    } catch {
+      // no-op
+    }
+  };
 
   const withConnectionFallback = async <T,>(
     ConnectionCtor: any,
@@ -537,13 +584,17 @@ export default function App(): JSX.Element {
       setStatus(humanizeError(error));
     } finally {
       setBusy(false);
-      setScanCooldown(true);
-      setTimeout(() => setScanCooldown(false), 5000);
+      setCooldownSeconds(10);
     }
   };
 
   const connectWallet = async (walletId: WalletId): Promise<void> => {
-    const targetProvider = getProvider(walletId);
+    let targetProvider = getProvider(walletId);
+    if (!targetProvider && walletId === "jupiter") {
+      pokeWalletDiscovery();
+      await new Promise((resolve) => setTimeout(resolve, 450));
+      targetProvider = getProvider(walletId);
+    }
     if (!targetProvider) {
       if (walletId === "jupiter") {
         setStatus("Jupiter extension not detected. Unlock Jupiter Wallet, refresh this page, then click Jupiter again.");
@@ -646,10 +697,13 @@ export default function App(): JSX.Element {
         return localSignatures;
       });
 
+      const claimedAmount = (beforeClaimLamports / LAMPORTS_PER_SOL).toFixed(6);
       setTxSignatures(signatures);
-      setClaimFx({ show: true, amount: (beforeClaimLamports / LAMPORTS_PER_SOL).toFixed(6) });
+      setClaimFx({ show: true, amount: claimedAmount });
       setTimeout(() => setClaimFx({ show: false, amount: "0" }), 2200);
       await scanAccounts(walletAddress);
+      playClaimDing();
+      setClaimReceipt({ open: true, amount: claimedAmount });
     } catch (error) {
       setStatus(humanizeError(error));
     } finally {
@@ -872,9 +926,9 @@ export default function App(): JSX.Element {
               disabled={busy}
             />
 
-            <Button variant="ghost" onClick={() => scanAccounts(addressInput.trim() || walletAddress)} disabled={busy || scanCooldown} className="h-12 rounded-xl border border-cyan-100/25 bg-white/10 px-5 text-cyan-50 hover:bg-white/20 disabled:opacity-60">
+            <Button variant="ghost" onClick={() => scanAccounts(addressInput.trim() || walletAddress)} disabled={scanLocked} className="h-12 rounded-xl border border-cyan-100/25 bg-white/10 px-5 text-cyan-50 hover:bg-white/20 disabled:opacity-60">
               <Eye className="mr-2 h-4 w-4" />
-              Preview
+              {cooldownSeconds > 0 ? `Preview (${cooldownSeconds}s)` : "Preview"}
             </Button>
 
             <Button disabled className="h-12 rounded-xl bg-slate-800/70 px-5 font-semibold text-cyan-100/70">
@@ -903,14 +957,14 @@ export default function App(): JSX.Element {
               <SolanaLogo />
               <p className="text-5xl font-bold text-[#00FFA3]">{reclaimSol} <span className="text-3xl text-cyan-200/70">SOL</span></p>
             </div>
-            <p className="mt-2 text-cyan-100/70">• Empty account reclaim: {reclaimSol} SOL ({accounts.length} accounts)</p>
-            <p className="mt-1 text-cyan-100/70">• Worthless token reclaim: {dustRentSol} SOL ({dustAccounts.length} tokens)</p>
+            <p className="mt-2 text-cyan-100/70">â€¢ Empty account reclaim: {reclaimSol} SOL ({accounts.length} accounts)</p>
+            <p className="mt-1 text-cyan-100/70">â€¢ Worthless token burn reclaim: {dustRentSol} SOL ({dustAccounts.length} tokens)</p>
 
             {walletAddress ? (
               <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                <Button onClick={() => scanAccounts(walletAddress)} disabled={busy || scanCooldown} className="h-11 rounded-xl bg-gradient-to-r from-[#00FFA3] to-[#7B5CFF] font-semibold text-[#041629] hover:opacity-90">
+                <Button onClick={() => scanAccounts(walletAddress)} disabled={scanLocked} className="h-11 rounded-xl bg-gradient-to-r from-[#00FFA3] to-[#7B5CFF] font-semibold text-[#041629] hover:opacity-90">
                   <RefreshCw className="mr-2 h-4 w-4" />
-                  Rescan Wallet
+                  {cooldownSeconds > 0 ? `Rescan Wallet (${cooldownSeconds}s)` : "Rescan Wallet"}
                 </Button>
                 <Button onClick={claimAll} disabled={!canClaim || busy} className="h-11 rounded-xl bg-gradient-to-r from-[#00FFA3] to-[#7B5CFF] font-semibold text-[#041629] hover:opacity-90">
                   <ArrowRightLeft className="mr-2 h-4 w-4" />
@@ -955,15 +1009,79 @@ export default function App(): JSX.Element {
           </div>
 
           <p className="text-center text-xs text-cyan-100/70">{status}</p>
+          {cooldownSeconds > 0 ? <p className="text-center text-xs text-cyan-100/60">Buttons unlock in {cooldownSeconds}s</p> : null}
           <p className="sr-only" aria-live="polite">{status}</p>
           <p className="sr-only" aria-hidden="true">{txSignatures.join(",")}</p>
         </div>
+
+        <AnimatePresence>
+          {claimReceipt.open ? (
+            <motion.div
+              className="absolute inset-0 z-30 flex items-center justify-center bg-[#020817]/70 backdrop-blur-md p-4"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+            >
+              <motion.div
+                initial={{ y: 24, scale: 0.92, opacity: 0 }}
+                animate={{ y: 0, scale: 1, opacity: 1 }}
+                exit={{ y: 10, scale: 0.95, opacity: 0 }}
+                className="w-full max-w-md rounded-2xl border border-cyan-300/35 bg-[#06142b] p-6 text-center shadow-neon"
+              >
+                <h3 className="text-xl font-semibold text-cyan-50">Claim Received</h3>
+                <p className="mt-1 text-sm text-cyan-100/70">Your SOL has been reclaimed successfully.</p>
+
+                <div className="relative mx-auto mt-5 h-44 w-56">
+                  <div className="absolute bottom-2 left-1/2 h-24 w-44 -translate-x-1/2 rounded-b-[48px] rounded-t-[24px] border border-cyan-300/35 bg-gradient-to-b from-[#123564] to-[#0a2142]" />
+                  <div className="absolute bottom-[84px] left-1/2 h-10 w-32 -translate-x-1/2 rounded-full border border-cyan-300/35 bg-[#143765]" />
+                  <motion.div
+                    className="absolute left-1/2 top-4 -translate-x-1/2"
+                    animate={{ y: [0, 96], opacity: [1, 1, 0.2] }}
+                    transition={{ duration: 0.9, repeat: Number.POSITIVE_INFINITY, repeatDelay: 0.15 }}
+                  >
+                    <SolanaLogo />
+                  </motion.div>
+                  <motion.div
+                    className="absolute left-[26%] top-12"
+                    animate={{ y: [0, 84], opacity: [1, 1, 0.2] }}
+                    transition={{ duration: 0.85, repeat: Number.POSITIVE_INFINITY, delay: 0.2 }}
+                  >
+                    <SolanaLogo />
+                  </motion.div>
+                  <motion.div
+                    className="absolute right-[26%] top-10"
+                    animate={{ y: [0, 88], opacity: [1, 1, 0.2] }}
+                    transition={{ duration: 0.95, repeat: Number.POSITIVE_INFINITY, delay: 0.35 }}
+                  >
+                    <SolanaLogo />
+                  </motion.div>
+                </div>
+
+                <p className="mt-2 text-3xl font-bold text-[#00FFA3]">+{claimReceipt.amount} SOL</p>
+                <Button
+                  onClick={() => setClaimReceipt({ open: false, amount: "0" })}
+                  className="mt-5 h-11 w-full rounded-xl bg-gradient-to-r from-[#00FFA3] to-[#7B5CFF] text-[#041629] font-semibold"
+                >
+                  OK
+                </Button>
+              </motion.div>
+            </motion.div>
+          ) : null}
+        </AnimatePresence>
       </section>
 
       <footer className="pb-3 text-center text-xs text-cyan-100/65">Copyright 2026 SOL Reclaimer</footer>
     </main>
   );
 }
+
+
+
+
+
+
+
+
 
 
 
