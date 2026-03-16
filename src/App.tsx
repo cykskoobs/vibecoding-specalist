@@ -367,6 +367,63 @@ export default function App(): JSX.Element {
         return { discovered, nonEmptyAccounts };
       };
 
+      const scanViaServerApi = async () => {
+        const response = await fetch("/api/scan-wallet", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ owner: trimmedAddress })
+        });
+
+        if (!response.ok) {
+          const text = await response.text();
+          throw new Error(text || `scan-api-${response.status}`);
+        }
+
+        const body = (await response.json()) as {
+          discovered?: Array<{
+            address: string;
+            mint: string;
+            lamports: number;
+            programId: string;
+            amountRaw: string;
+            uiAmount: number;
+            uiAmountString: string;
+            decimals: number;
+          }>;
+          nonEmptyAccounts?: Array<{
+            address: string;
+            mint: string;
+            lamports: number;
+            programId: string;
+            amountRaw: string;
+            uiAmount: number;
+            uiAmountString: string;
+            decimals: number;
+          }>;
+        };
+
+        const discovered = (body.discovered ?? []).map((item) => ({
+          address: item.address,
+          mint: item.mint,
+          lamports: item.lamports,
+          programId: item.programId
+        }));
+
+        const nonEmptyAccounts = (body.nonEmptyAccounts ?? []).map((item) => ({
+          address: item.address,
+          mint: item.mint,
+          lamports: item.lamports,
+          programId: item.programId,
+          amountRaw: item.amountRaw,
+          decimals: item.decimals,
+          uiAmount: item.uiAmount,
+          uiAmountString: item.uiAmountString,
+          priceUsd: 0,
+          usdValue: 0
+        }));
+
+        return { discovered, nonEmptyAccounts };
+      };
       const scanViaConnection = async (connection: any) => {
         const discovered: CloseableTokenAccount[] = [];
         const nonEmptyAccounts: DustTokenAccount[] = [];
@@ -391,7 +448,14 @@ export default function App(): JSX.Element {
       let bestEndpoint = activeEndpoint;
       let latestError: unknown = null;
 
-      for (let round = 0; round < 2; round += 1) {
+      try {
+        bestResult = await scanViaServerApi();
+        bestEndpoint = "server-api";
+      } catch (error) {
+        latestError = error;
+      }
+
+      for (let round = 0; round < 2 && !bestResult; round += 1) {
         for (const endpoint of endpoints) {
           try {
             const connection = new Connection(endpoint, COMMITMENT);
@@ -421,7 +485,9 @@ export default function App(): JSX.Element {
         throw latestError ?? new Error("Unable to scan token accounts right now.");
       }
 
-      setActiveEndpoint(bestEndpoint);
+      if (/^https?:\/\//i.test(bestEndpoint)) {
+        setActiveEndpoint(bestEndpoint);
+      }
 
       let lowValueDust: DustTokenAccount[] = [];
       if (bestResult.nonEmptyAccounts.length > 0) {
@@ -878,6 +944,14 @@ export default function App(): JSX.Element {
     </main>
   );
 }
+
+
+
+
+
+
+
+
 
 
 
