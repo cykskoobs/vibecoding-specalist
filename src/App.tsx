@@ -1305,7 +1305,7 @@ export default function App(): JSX.Element {
 
               <div className="border-t border-cyan-200/20 px-3 py-2">
                 <div className="mb-2 flex flex-wrap gap-1.5">
-                  {CYKUBA_SUGGESTIONS.slice(0, 4).map((question) => (
+                  {CYKUBA_SUGGESTIONS.map((question) => (
                     <button
                       key={question}
                       type="button"
@@ -1358,6 +1358,7 @@ export default function App(): JSX.Element {
     </main>
   );
 }
+
 
 
 
