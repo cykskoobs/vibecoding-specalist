@@ -74,7 +74,8 @@ const CYKUBA_SUGGESTIONS = [
   "Where does reclaimed SOL come from?",
   "Is this safe to use?",
   "How can I verify transactions myself?",
-  "What are worthless tokens and why optional?"
+  "What are worthless tokens and why optional?",
+  "Yo Aiden job g"
 ];
 const CYKUBA_AVATAR_URL =
   "https://pbs.twimg.com/profile_images/1870397360037367808/GmBXi9XR_400x400.jpg";
@@ -1357,6 +1358,7 @@ export default function App(): JSX.Element {
     </main>
   );
 }
+
 
 
 
