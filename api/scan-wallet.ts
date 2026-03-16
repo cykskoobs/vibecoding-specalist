@@ -11,6 +11,36 @@ type ScanAccount = {
   decimals: number;
 };
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function callRpcWithRetry(payload: unknown) {
+  let lastError: unknown = null;
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const upstream = await fetch(RPC_URL, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+
+      const raw = await upstream.text();
+      const json = JSON.parse(raw);
+
+      if (!upstream.ok || json?.error) {
+        throw new Error(json?.error?.message ?? `rpc-http-${upstream.status}`);
+      }
+
+      return json;
+    } catch (error) {
+      lastError = error;
+      await sleep(250 * (attempt + 1));
+    }
+  }
+
+  throw lastError ?? new Error("RPC retries exhausted");
+}
+
 export default async function handler(req: any, res: any) {
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
@@ -41,17 +71,7 @@ export default async function handler(req: any, res: any) {
 
     for (const programId of programIds) {
       payload.params[1] = { programId };
-      const upstream = await fetch(RPC_URL, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-
-      const raw = await upstream.text();
-      const json = JSON.parse(raw);
-      if (json?.error) {
-        throw new Error(json.error?.message ?? "RPC error");
-      }
+      const json = await callRpcWithRetry(payload);
 
       const items = (json?.result?.value ?? []) as any[];
       for (const tokenAccount of items) {
@@ -89,10 +109,7 @@ export default async function handler(req: any, res: any) {
       }
     }
 
-    return res.status(200).json({
-      discovered,
-      nonEmptyAccounts
-    });
+    return res.status(200).json({ discovered, nonEmptyAccounts });
   } catch (error) {
     return res.status(502).json({
       error: error instanceof Error ? error.message : "Scan failed"

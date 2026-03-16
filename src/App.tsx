@@ -832,7 +832,7 @@ export default function App(): JSX.Element {
                     </div>
                     <div>
                       <p className="font-semibold text-cyan-50">{wallet.name}</p>
-                      <p className="text-xs text-cyan-100/70">{canAttemptConnect ? "Click to connect" : "Extension not detected"}</p>
+                      <p className="text-xs text-cyan-100/70">{wallet.id === "jupiter" ? "Click to connect Jupiter Wallet" : canAttemptConnect ? "Click to connect" : "Extension not detected"}</p>
                     </div>
                   </button>
                 );
@@ -891,10 +891,14 @@ export default function App(): JSX.Element {
             <p className="mt-1 text-cyan-100/70">• Worthless token reclaim: {dustRentSol} SOL ({dustAccounts.length} tokens, {dustUsdValue} USD tracked)</p>
 
             {walletAddress ? (
-              <div className="mt-5">
+              <div className="mt-5 grid gap-3 sm:grid-cols-2">
                 <Button onClick={() => scanAccounts(walletAddress)} disabled={busy} className="h-11 rounded-xl bg-gradient-to-r from-[#00FFA3] to-[#7B5CFF] font-semibold text-[#041629] hover:opacity-90">
                   <RefreshCw className="mr-2 h-4 w-4" />
                   Rescan Wallet
+                </Button>
+                <Button onClick={claimAll} disabled={!canClaim || busy} className="h-11 rounded-xl bg-gradient-to-r from-[#00FFA3] to-[#7B5CFF] font-semibold text-[#041629] hover:opacity-90">
+                  <ArrowRightLeft className="mr-2 h-4 w-4" />
+                  Claim Empty Accounts
                 </Button>
               </div>
             ) : null}
@@ -944,6 +948,10 @@ export default function App(): JSX.Element {
     </main>
   );
 }
+
+
+
+
 
 
 
